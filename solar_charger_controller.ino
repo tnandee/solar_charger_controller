@@ -1,24 +1,11 @@
 /*
-  Serial Event example
-
- When new serial data arrives, this sketch adds it to a String.
- When a newline is received, the loop prints the string and
- clears it.
-
- A good test for this is to try it with a GPS receiver
- that sends out NMEA 0183 sentences.
-
- Created 9 May 2011
- by Tom Igoe
-
- This example code is in the public domain.
-
- http://www.arduino.cc/en/Tutorial/SerialEvent
-
+  Solar charger controller, or monitor or whatever
  */
 
-String inputString = "";         // a string to hold incoming data
-boolean stringComplete = false;  // whether the string is complete
+#include <SoftwareSerial.h>
+
+void meas(void);
+void sendMeas(float a, float b, float c);
 
 float VREF = 1.1;
 float ADSTEP = VREF / 1024.0;
@@ -34,48 +21,67 @@ float gelV;
 float USB_CURR_MUL = 2.0 * ADSTEP * 1000.0; // 4k7 - 4k7 [mA]
 float usbC;
 
+#define SAMPLE_PERIOD_MS  100
+#define DEF_SAMPLE_NO 16
+long lastMsg = 0;
+int sampleLeft = DEF_SAMPLE_NO; 
+float avgGelC = 0.0;
+float avgGelV = 0.0;
+float avgUsbC = 0.0;
+
+SoftwareSerial BTserial(11, 12);
 
 void setup() {
   analogReference(INTERNAL);
-  
-  Serial.begin(9600);
-  inputString.reserve(200); // reserve 200 bytes for the inputString:
+  BTserial.begin(9600);
 }
 
 void loop() {
-  if (stringComplete) {
-    gelV = analogRead(GEL_VOLT_PIN) * GEL_VOLT_MUL;
-    Serial.print(gelV, 2);
-    Serial.print(" ");
-    gelC = analogRead(GEL_CURR_PIN) * GEL_CURR_MUL;
-    Serial.print(gelC, 2);
-    Serial.print(" ");
-    usbC = analogRead(USB_CURR_PIN) * USB_CURR_MUL;
-    Serial.println(usbC, 2);
- 
-    inputString = "";
-    stringComplete = false;
-  }
-}
-
-/*
-  SerialEvent occurs whenever a new data comes in the
- hardware serial RX.  This routine is run between each
- time loop() runs, so using delay inside loop can delay
- response.  Multiple bytes of data may be available.
- */
-void serialEvent() {
-  while (Serial.available()) {
-    // get the new byte:
-    char inChar = (char)Serial.read();
-    // add it to the inputString:
-    inputString += inChar;
-    // if the incoming character is a newline, set a flag
-    // so the main loop can do something about it:
-    if (inChar == '\n') {
-      stringComplete = true;
+  while (BTserial.available() > 0) {
+    if (BTserial.read() == '\n') {
+      meas();
+      sendMeas(gelV, gelC, usbC);
     }
   }
+  avgMeas();  
 }
 
+void avgMeas(){
+  long now = millis();
+  if (now - lastMsg > SAMPLE_PERIOD_MS) {
+    lastMsg = now;
+
+    meas();
+
+    avgGelV += gelV;
+    avgGelC += gelC;
+    avgUsbC += usbC;
+
+    sampleLeft -= 1;    
+  }
+  if (sampleLeft <= 0){
+     avgGelV = avgGelV / DEF_SAMPLE_NO;    
+     avgGelC = avgGelC / DEF_SAMPLE_NO;
+     avgUsbC = avgUsbC / DEF_SAMPLE_NO;
+
+     sendMeas(avgGelV, avgGelC, avgUsbC);
+     
+     sampleLeft = DEF_SAMPLE_NO;
+     avgGelV = avgGelC = avgUsbC = 0.0;
+  }
+}
+
+void meas(){
+    gelV = analogRead(GEL_VOLT_PIN) * GEL_VOLT_MUL;
+    gelC = analogRead(GEL_CURR_PIN) * GEL_CURR_MUL;
+    usbC = analogRead(USB_CURR_PIN) * USB_CURR_MUL;
+}
+
+void sendMeas(float a, float b, float c){
+    BTserial.print(a, 2);
+    BTserial.print(",");
+    BTserial.print(b, 0);
+    BTserial.print(",");
+    BTserial.println(c, 0);  
+}
 
